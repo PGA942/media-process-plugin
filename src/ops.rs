@@ -181,6 +181,29 @@ impl Sticker {
         RectF::new(self.cx - hx, self.cy - hy, hx * 2.0, hy * 2.0)
     }
 
+    /// **回転前**の正方形(中心 ± 一辺/2)。重ねの `Box` はこれに `angle` を付けて出す(ホストが中心で回転して描く)。
+    pub fn rect(&self) -> RectF {
+        let hs = self.size / 2.0;
+        RectF::new(self.cx - hs, self.cy - hs, self.size, self.size)
+    }
+
+    /// 回転(度、時計回り)。重ねの `Box.p.angle` / 合わせる先の `snap.angle` と同じ単位。
+    pub fn angle_degrees(&self) -> f32 {
+        self.angle.to_degrees()
+    }
+
+    /// 合わせる先の矩形 `target`(+ 角度 `angle`(ラジアン))の**内側**に、縦横比 1:1 を保って収める:
+    /// 一辺 = min(幅, 高さ)(ただし `min_size` 以上)、中心 = 矩形の中心、角度 = `angle`。スプライト番号は変えない。
+    pub fn fit_into(&mut self, target: &RectF, angle: f32, min_size: f32) {
+        if !(target.x.is_finite() && target.y.is_finite() && target.w.is_finite() && target.h.is_finite()) {
+            return;
+        }
+        self.size = target.w.min(target.h).max(min_size);
+        self.cx = target.x + target.w / 2.0;
+        self.cy = target.y + target.h / 2.0;
+        self.angle = if angle.is_finite() { angle } else { 0.0 };
+    }
+
     /// 中心からの相対ベクトル `(dx, dy)`(未回転)を回転して絶対座標にする。
     pub fn local_to_world(&self, dx: f32, dy: f32) -> (f32, f32) {
         let (s, c) = self.angle.sin_cos();

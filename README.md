@@ -1,4 +1,4 @@
-# media-process-plugin — 加工: 顔ぼかし / スタンプ(スロット `composer.media`、契約 v0.5、プラグイン v0.1.0)
+# media-process-plugin — 加工: 顔ぼかし / スタンプ(スロット `composer.media`、契約 v0.6、プラグイン v0.1.0)
 
 コンポーザーの添付画像(PNG / JPEG)に **顔検知ぼかし** と **スタンプ(オブジェクト)** を掛けるサンプル。
 UI はホストの**専用全画面エディター**(中央プレビュー + 右の「プラグイン / ジャンル」列 + 下付きの編集ボタン列 + キャンセル / 適用)で、
@@ -17,7 +17,7 @@ UI はホストの**専用全画面エディター**(中央プレビュー + 右
 | `media.action {…, action:"reset"}` | 顔のトグルとオブジェクトを捨て、重ねを消し、元のプレビューに戻す |
 | `face.<i>`(重ねの `tap`) | 顔 `i` のぼかしを on / off → プレビュー + 重ねを出し直す |
 | `sticker.add.<i>`(FOW の `tap`) | スプライト `i` をプレビュー中央に置く(一辺 = 短辺 / 3、角度 0)→ 選択 → プレビュー + 重ね |
-| `obj.<i>.move`(`drag` / `tap`) | ドラッグで移動(`dx`/`dy` を中心に足す。中心はプレビュー内に clamp)/ タップで選択 |
+| `obj.<i>.move`(`drag` / `tap`) | ドラッグで移動(`dx`/`dy` を中心に足す。中心はプレビュー内に clamp)/ タップで選択。`end` の `snap`(v0.6)で合わせる先に収める(下記) |
 | `obj.<i>.scale`(`drag`) | 右下ハンドル。中心→ハンドル方向への射影の比で一辺を変える(**縦横比 1:1 固定、最小 16px**) |
 | `obj.<i>.rotate`(`drag`) | 上のハンドル。中心からの `atan2` で角度(ハンドルは回転に追従する) |
 | `obj.<i>.delete` / `obj.<i>.dup`(`tap`) | 削除 / 複製(+16px ずらして選択) |
@@ -48,12 +48,13 @@ UI はホストの**専用全画面エディター**(中央プレビュー + 右
   call("sticker.add.1", {kind:"tap"}) ───▶ 中央に一辺 = 短辺/3 のオブジェクト、選択
                                         ◀ composer.media.preview(スタンプを合成したプレビュー)
                                         ◀ composer.media.overlay root: Stack[
-                                              Box k:"obj.0"        on:{drag:"obj.0.move", tap:"obj.0.move"}   … 回転後の外接矩形(選択中は橙の枠)
+                                              Box k:"obj.0" p:{label:"スタンプ 1", angle:0, …} on:{drag:"obj.0.move", tap:"obj.0.move"} … 回転前の正方形(選択中は橙の枠。ホストが angle で回して描く)
                                               Box k:"obj.0.scale"  on:{drag:"obj.0.scale"}                      … 右下の丸いハンドル 20×20
                                               Box k:"obj.0.rotate" on:{drag:"obj.0.rotate"}                     … 上(回転に追従)の青いハンドル 20×20
                                               Box k:"obj.0.delete" on:{tap:"obj.0.delete"} c:[Icon "delete"]     … 枠の下のボタン 26×26
                                               Box k:"obj.0.dup"    on:{tap:"obj.0.dup"}    c:[Icon "content_copy"] ]
   call("obj.0.move",   {phase:"update", x, y, dx, dy}) ▶ 中心 += (dx, dy)             ◀ preview + overlay
+  call("obj.0.move",   {phase:"end", …, snap:{key, left, top, width, height, angle}}) ▶ 合わせる先の内側に 1:1 で収める + 角度  ◀ preview + overlay
   call("obj.0.scale",  {phase:"start"|"update"|"end", dx, dy}) ▶ 一辺 = 開始時の一辺 × 射影 / 開始距離(≥ 16)  ◀ preview + overlay
   call("obj.0.rotate", {phase, dx, dy}) ▶ 角度 = atan2(ハンドル − 中心) + π/2                ◀ preview + overlay
   call("obj.0.dup",    {kind:"tap"}) ────▶ obj.1 を +16px に作って選択                     ◀ preview + overlay
@@ -83,8 +84,13 @@ UI はホストの**専用全画面エディター**(中央プレビュー + 右
   FOW には PNG の `data:` URI(`Image.p.src`)で出す。
 - オブジェクト(`ops::Sticker` = スプライト番号 / 中心 / 一辺 / 角度)は**プレビュー px** で持つ(= 重ねの座標系)。プレビューへの合成は
   逆写像 + バイリニア + アルファ合成(`ops::composite_sprite`)、適用時は座標 × (フル / プレビュー) で同じ関数をフル画像に掛ける。
-- 重ねの `Box` は回転後の**軸平行な外接矩形**(ホストの `Box` は回転できない)。ドラッグの payload `{phase, x, y, dx, dy}` は `dx`/`dy` だけ使い、
+- 重ねの `Box` は**回転前の正方形**(中心 ± 一辺/2)に `p.angle`(度)を付けて出す(v0.6: ホストが中心で回転して描く)。ハンドル / ボタンの
+  位置だけは回転後の軸平行な外接矩形(`ops::Sticker::bbox`)から計算する。ドラッグの payload `{phase, x, y, dx, dy}` は `dx`/`dy` だけ使い、
   拡縮 / 回転はハンドルの位置を `start` から積算して中心との相対で計算する(拡縮は射影なので中心を越えても最小 16px で止まる)。
+- **合わせる先(v0.6)**: 重ねの `Box` には一覧用の `p.label`(オブジェクト = 「スタンプ 1」、顔 = 「顔 1」。ハンドル / ボタンには付けない)を
+  付ける。ホストが合わせる先を決めていると `obj.<i>.move` の `end` に `snap: {key, label?, left, top, width, height, angle}`(プレビュー px / 度)が
+  付くので、スタンプを**その矩形の内側に 1:1 で収める**: 一辺 = `min(width, height)`(最小 16px)、中心 = 矩形の中心、角度 = `angle`(省略時 0)。
+  `key` が自分の枠(`obj.<i>`)なら無視。拡縮 / 回転ハンドルの `end` に付いた `snap` は使わない(`ops::Sticker::fit_into`)。
 - 重ねは顔もオブジェクトも無くなったら `root: null` で消す。プレビューを差し替えるたびに重ねも出し直す(座標系は同じだが枠の位置が変わるため)。
 
 ## 制限 / メモ
