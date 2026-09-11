@@ -72,7 +72,8 @@ pub fn catalog() -> Value {
     json!({
         "genres": [
             {"id": GENRE_PROCESS, "actions": [
-                {"id": "faces", "label": "顔ぼかし", "icon": "face_retouching_off"},
+                // 顔ぼかし(`faces`)は実機で検知できなかったので一覧から外した(呼べば動く。ONNX の `ml.infer` が
+                // つながったら YuNet で戻す予定)。
                 {"id": "sticker", "label": "スタンプ", "icon": "emoji_emotions"},
                 {"id": "reset", "label": "リセット", "icon": "restart_alt"},
             ]},
@@ -889,13 +890,11 @@ mod tests {
         assert_eq!(gs[0]["id"], json!("process"));
         assert!(gs[0].get("label").is_none() && gs[0].get("icon").is_none(), "standard genre must not carry label / icon");
         let acts = gs[0]["actions"].as_array().unwrap();
-        assert_eq!(acts.iter().map(|a| a["id"].as_str().unwrap()).collect::<Vec<_>>(), ["faces", "sticker", "reset"]);
-        assert_eq!(acts[0]["label"], json!("顔ぼかし"));
-        assert_eq!(acts[0]["icon"], json!("face_retouching_off"));
-        assert_eq!(acts[1]["label"], json!("スタンプ"));
-        assert_eq!(acts[1]["icon"], json!("emoji_emotions"));
-        assert_eq!(acts[2]["label"], json!("リセット"));
-        assert_eq!(acts[2]["icon"], json!("restart_alt"));
+        assert_eq!(acts.iter().map(|a| a["id"].as_str().unwrap()).collect::<Vec<_>>(), ["sticker", "reset"]);
+        assert_eq!(acts[0]["label"], json!("スタンプ"));
+        assert_eq!(acts[0]["icon"], json!("emoji_emotions"));
+        assert_eq!(acts[1]["label"], json!("リセット"));
+        assert_eq!(acts[1]["icon"], json!("restart_alt"));
         assert_eq!(call_native("media.commit", json!({"token": "t"})).unwrap_err()["code"], json!("D01"));
     }
 

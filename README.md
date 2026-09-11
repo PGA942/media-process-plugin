@@ -110,6 +110,12 @@ cargo build --release --target wasm32-unknown-unknown -p media-process-plugin  #
 4. 下の列で **顔ぼかし**(顔の枠をタップで個別に on / off)/ **スタンプ**(下付き FOW から貼る → 枠をドラッグで移動、右下で拡縮、上で回転、下のボタンで削除 / 複製)/ **リセット**
 5. ヘッダーの **適用** で添付が差し替わる(**キャンセル** で破棄)
 
+## 顔ぼかしについて(2026-09-11)
+
+実機(wasm インタプリタ上の rustface)では画面の 40% 程度の顔でも検知できなかったため、`media.catalog` の一覧から
+`faces` を外した(`media.action {action:"faces"}` を直接呼べば従来どおり動く)。ホストの `ml.infer`(ONNX)がつながったら
+YuNet で置き換える。基本の加工(ぼかし / モザイク)はホスト側の pro_image_editor(D-173)が担う。
+
 ---
 
 ## このリポジトリの形
