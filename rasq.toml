@@ -1,0 +1,22 @@
+schema = "rasq.workspace/1"
+sdk = "0.1.0"
+
+[author]
+namespace = "sample"
+
+[[plugins]]
+name = "media-process-plugin"
+slot = "composer.media"
+id = "sample.media-process"
+
+# 顔検知のカスケード(SeetaFace FuSt、docs/cli.md §2 / §4)。
+# [[models]] = どんなモデルを使っているかの宣言(審査で見えるようにする)。
+# [[assets]] = その本体。配布物に 1 つだけ入れ、ビルド時は include_bytes! で wasm に取り込む
+#             (ホストが storage.get({ns: "asset"}) を配線したら include_bytes! をやめられる)。
+[[models]]
+manifest = "models/seeta-fd-frontal.model.json"
+lazy = false
+
+[[assets]]
+path = "models/seeta_fd_frontal_v1.0.bin"
+kind = "data"

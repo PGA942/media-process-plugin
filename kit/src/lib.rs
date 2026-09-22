@@ -1,6 +1,6 @@
 //! rasq-plugin-kit — RASQ wasm プラグインの共通部品。
 //!
-//! `rasq-sdk-sample/PROTOCOL.md` の wasm ABI(v1・同期)をそのまま包む:
+//! `PROTOCOL.md` の wasm ABI(v1・同期)をそのまま包む:
 //!
 //! - [`rasq_plugin!`] マクロが `snapshot` / `patch` / `call` / `alloc` / `dealloc` を export
 //! - [`host_call`] でホスト関数(`rasq.hostfn/1`)を呼ぶ(native ビルドではテスト用フックに差し替え可)
@@ -8,7 +8,7 @@
 //! - [`set_patch`] / [`tree_updated`] で本体ツリーの差分/再取得を頼む
 //!
 //! プラグイン本体は「`root()` が返す RRL」と「`call(fn, args)` の match」だけ書けばよい。
-//! 契約の正典は `../CONTRACT.md`(スロット契約)と rasq-sdk-sample の `PROTOCOL.md`。
+//! 契約の正典は `docs/slots.md`(スロット契約)と `PROTOCOL.md`。plugin-sample の各リポジトリの `kit/` はこのクレートの複製(D-244i: ここが正典、`rasq init` がワークスペースへ写す)。
 
 use serde_json::{json, Value};
 use std::cell::RefCell;

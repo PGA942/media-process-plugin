@@ -1,4 +1,8 @@
-//! media-process-plugin — スロット `composer.media`(CONTRACT.md §2.2、v0.5)の「加工」サンプル。
+//! media-process-plugin — スロット `composer.media`(契約 v0.13、`../../CONTRACT.md` → SDK の `docs/slots.md` §2.2。
+//! v0.5 重ね、v0.6 合わせる先、v0.10 下段バーのボタン宣言)の「加工」サンプル。
+//!
+//! 下段バーのボタンは `manifest.json` の `actions[].slot = "composer.media"` で 1 つ宣言している
+//! (`process` / 「加工」/ `Filter` `Blur` タグ)。`accepts` は省略 = `["image/*"]`、`output` も省略 = `replace`。
 //!
 //! - **顔ぼかし**: wasm の中で顔を検知(SeetaFace FuSt カスケード = `rustface`、[`faces`])し、顔ごとにボックスぼかし。
 //!   検知した顔は重ね(`composer.media.overlay`)に枠 `Box` で出し、タップで顔ごとにぼかしの on / off。
@@ -8,13 +12,14 @@
 //!
 //! | 入口 | 中身 |
 //! |---|---|
-//! | `plugin.manifest` | [`rasq_plugin_kit::manifest`] |
+//! | `plugin.manifest` | `manifest.json` を `include_str!` でそのまま返す |
 //! | `media.catalog {}` | 静的な一覧 [`catalog`](ジャンル `process`: `faces` / `sticker` / `reset`)。セッション不要 |
-//! | `media.edit {token, index, name, mimeType, bytesB64}` | デコード → 保持(長辺 ≤ 2048)→ 初期プレビューを push(`width`/`height` 付き)→ 戻り `{genres}` |
+//! | `media.edit {token, index, name, mimeType, actionId?, bytesB64}` | デコード → 保持(長辺 ≤ 2048)→ 初期プレビューを push(`width`/`height` 付き)→ 戻り `{genres}` |
 //! | `media.action {token, genre:"process", action}` | `faces`: 検知 → ぼかし → プレビュー + 重ね(無ければ toast)。`sticker`: FOW を開く。`reset`: 初期化。戻り `{}` |
 //! | `face.<i>`(重ねの `tap`) | 顔 `i` のぼかしをトグル → プレビュー + 重ねを出し直す |
 //! | `sticker.add.<i>`(FOW の `tap`) | スプライト `i` をプレビュー中央に置いて選択 → プレビュー + 重ね |
 //! | `obj.<i>.move` / `obj.<i>.scale` / `obj.<i>.rotate`(重ねの `drag`) | オブジェクト `i` を移動 / 拡縮 / 回転(payload `{phase, x, y, dx, dy}`) |
+//! | `obj.<i>.move` の `end` に `snap: {key, left, top, width, height, angle}`(v0.6) | 合わせる先の矩形の**内側**に 1:1 で収める(一辺 = min(width, height)、中心 = 矩形の中心)+ 角度 = `angle`(度)。`key` が自分(`obj.<i>`)なら無視 |
 //! | `obj.<i>.move`(`tap`)/ `obj.<i>.delete` / `obj.<i>.dup`(`tap`) | 選択 / 削除 / 複製(+16px ずらす) |
 //! | `closeSticker`(`tap`)/ `stickerClosed` | FOW を閉じる / ホスト側で閉じられた |
 //! | `media.commit {token}` | フル解像度で ぼかし(有効な顔)→ スタンプ合成 → PNG → **戻り値で** `{bytesB64, mimeType, name}`。重ねを消し FOW を閉じ、状態を捨てる |
@@ -22,6 +27,10 @@
 //!
 //! 座標系: 顔の矩形はフル画像 px で持ち、プレビュー / 検知画像へは [`ops::RectF::map`] で写す。オブジェクトは
 //! プレビュー px で持ち(重ねの座標系と同じ)、適用時に [`ops::Sticker::scaled`] でフル画像へ写す。
+//!
+//! 重ねの `Box`(v0.6): 顔は `label: "顔 <i+1>"`、オブジェクトは `label: "スタンプ <i+1>"` + `angle`(度)を付け、矩形は
+//! **回転前**の正方形(中心 ± 一辺/2)で出す(ホストが `angle` で中心回転して描く)。ハンドル / ボタンの位置は回転後の
+//! 外接矩形([`ops::Sticker::bbox`])から計算する。
 
 pub mod faces;
 pub mod ops;
@@ -33,13 +42,13 @@ use image::codecs::png::{CompressionType, FilterType, PngEncoder};
 use image::{ImageEncoder, ImageFormat, RgbaImage};
 use ops::{RectF, Sticker};
 use rasq_plugin_kit::serde_json::{json, Value};
-use rasq_plugin_kit::{err, fow_spec, host, manifest, rasq_plugin, rrl, unsupported, Surface};
+use rasq_plugin_kit::{err, fow_spec, host, rasq_plugin, rrl, unsupported, Surface};
 use std::sync::{Mutex, OnceLock};
 
-const PLUGIN_ID: &str = "sample.media-process";
-const VERSION: &str = "0.1.0";
-const PLUGIN_NAME: &str = "加工(顔ぼかし / スタンプ)(サンプル)";
-const DESCRIPTION: &str = "顔を検知してぼかす、スタンプをオブジェクトとして貼る(移動 / 拡縮 / 回転 / 削除 / 複製)";
+/// `plugin.manifest` の答え = `manifest.json`(名前 / 版 / 説明 / 権限 / ボタン宣言はあちらを直す)。
+fn manifest() -> Value {
+    rasq_plugin_kit::serde_json::from_str(include_str!("../manifest.json")).expect("manifest.json")
+}
 
 /// プレビューの長辺(px)。重ねの座標系もこれ。
 pub const PREVIEW_MAX_SIDE: u32 = 360;
@@ -262,15 +271,36 @@ fn overlay_root(s: &Session) -> Value {
     for (i, f) in s.faces.iter().enumerate() {
         let r = f.rect.expanded(FACE_EXPAND).map(full, (pw, ph));
         let (color, border) = if f.enabled { ("#34C759", 2.0) } else { ("#FFFFFF99", 1.5) };
-        let node = sized_box(&format!("face.{i}"), r.x, r.y, r.w, r.h, json!({"color": "#00000000", "borderColor": color, "borderWidth": border, "radius": 6}), vec![]);
+        let node = sized_box(
+            &format!("face.{i}"),
+            r.x,
+            r.y,
+            r.w,
+            r.h,
+            json!({"color": "#00000000", "borderColor": color, "borderWidth": border, "radius": 6, "label": format!("顔 {}", i + 1)}),
+            vec![],
+        );
         children.push(rrl::with_on(node, "tap", &format!("face.{i}")));
     }
 
     for (i, o) in s.objects.iter().enumerate() {
         let selected = s.selected == Some(i);
-        let b = o.bbox();
+        // 回転前の正方形 + `angle`(度)。ホストが中心で回転して描く(v0.6)。ハンドルの位置は回転後の外接矩形から
+        let r = o.rect();
         let (color, border) = if selected { ("#FF9500", 2.0) } else { ("#FFFFFFB0", 1.0) };
-        let node = sized_box(&format!("obj.{i}"), b.x, b.y, b.w, b.h, json!({"color": "#00000000", "borderColor": color, "borderWidth": border, "radius": 4}), vec![]);
+        let node = sized_box(
+            &format!("obj.{i}"),
+            r.x,
+            r.y,
+            r.w,
+            r.h,
+            json!({
+                "color": "#00000000", "borderColor": color, "borderWidth": border, "radius": 4,
+                "label": format!("スタンプ {}", i + 1),
+                "angle": o.angle_degrees() as f64,
+            }),
+            vec![],
+        );
         let node = rrl::with_on(node, "drag", &format!("obj.{i}.move"));
         children.push(rrl::with_on(node, "tap", &format!("obj.{i}.move")));
     }
@@ -532,6 +562,22 @@ fn drag_payload(args: &Value) -> (String, f32, f32) {
     (phase, dx, dy)
 }
 
+/// `drag` の `end` に付く合わせる先 `snap: {key, label?, left, top, width, height, angle}`(プレビュー px / 度、CONTRACT §2.2 v0.6)を
+/// 読む。無い / 壊れている / `key` が自分(`own_key`)のときは `None`。戻りは(矩形、角度(ラジアン))。
+fn snap_target(snap: &Value, own_key: &str) -> Option<(RectF, f32)> {
+    let obj = snap.as_object()?;
+    if obj.get("key").and_then(Value::as_str) == Some(own_key) {
+        return None;
+    }
+    let num = |k: &str| obj.get(k).and_then(Value::as_f64).filter(|v| v.is_finite()).map(|v| v as f32);
+    let rect = RectF::new(num("left")?, num("top")?, num("width")?, num("height")?);
+    if !(rect.w > 0.0 && rect.h > 0.0) {
+        return None;
+    }
+    let angle = num("angle").unwrap_or(0.0).to_radians();
+    Some((rect, angle))
+}
+
 /// `obj.<i>.<op>`: 重ねのオブジェクト操作。
 fn object_event(rest: &str, args: &Value) -> Result<Value, Value> {
     let (index, op) = rest.split_once('.').ok_or_else(|| err("D01", format!("bad object event: {rest}")))?;
@@ -557,6 +603,14 @@ fn object_event(rest: &str, args: &Value) -> Result<Value, Value> {
             let o = &mut s.objects[i];
             o.cx = (o.cx + dx).clamp(0.0, pw as f32);
             o.cy = (o.cy + dy).clamp(0.0, ph as f32);
+            // v0.6: `end` に合わせる先(`snap`)が付いていれば、その矩形の内側に収めて角度を合わせる
+            if phase == "end" {
+                if let Some(target) = snap_target(&args["snap"], &format!("obj.{i}")) {
+                    o.fit_into(&target.0, target.1, MIN_OBJECT_SIZE);
+                    o.cx = o.cx.clamp(0.0, pw as f32);
+                    o.cy = o.cy.clamp(0.0, ph as f32);
+                }
+            }
             s.drag = if phase == "end" { None } else { Some(Drag { kind: DragKind::Move, index: i, point: (0.0, 0.0), start_dist: 0.0, start_size: 0.0, dir: (0.0, 0.0) }) };
             refresh(s)?;
             Ok(json!({}))
@@ -624,7 +678,7 @@ fn object_event(rest: &str, args: &Value) -> Result<Value, Value> {
 
 fn handle(fn_name: &str, args: Value) -> Result<Value, Value> {
     match fn_name {
-        "plugin.manifest" => Ok(manifest(PLUGIN_ID, PLUGIN_NAME, VERSION, "action", DESCRIPTION, &["composer.media"], &["fow.widget"])),
+        "plugin.manifest" => Ok(manifest()),
         "media.catalog" => Ok(catalog()),
         "media.edit" => media_edit(args),
         "media.action" => media_action(args),
@@ -866,6 +920,42 @@ mod tests {
 
     // ---- call: マニフェスト / 一覧 / 入力検証 ---------------------------------
 
+    /// `plugin.manifest` は `manifest.json` そのもの(`rasq check` の往復検査と同じ突き合わせ)。
+    #[test]
+    fn manifest_matches_manifest_json() {
+        let m = call_native("plugin.manifest", json!({})).unwrap();
+        let file: Value = rasq_plugin_kit::serde_json::from_str(include_str!("../manifest.json")).unwrap();
+        assert_eq!(m, file);
+    }
+
+    /// 下段バーのボタン宣言(v0.10): `actions[].slot` は宣言したスロットのものだけ。
+    #[test]
+    fn declared_actions_are_composer_media() {
+        let m = call_native("plugin.manifest", json!({})).unwrap();
+        let actions = m["actions"].as_array().expect("actions が宣言されていない(v0.10)");
+        assert!(!actions.is_empty());
+        for a in actions {
+            assert_eq!(a["slot"], json!("composer.media"), "actions[].slot: {a}");
+            assert!(a["id"].is_string() && a["label"].is_string(), "id / label が要る: {a}");
+        }
+    }
+
+    /// 押されたボタンの `actionId`(v0.10)が付いても `media.edit` は同じジャンル一覧を返す。
+    #[test]
+    fn media_edit_accepts_action_id() {
+        let _g = serial();
+        let _ = call_native("media.cancel", json!({}));
+        set_host_hook(|_, _| json!({}));
+        take_host_log();
+        let r = call_native(
+            "media.edit",
+            json!({"token": "tok-a", "index": 0, "name": "a.png", "mimeType": "image/png", "actionId": "process", "bytesB64": flat_png(64, 48, [10, 20, 30, 255])}),
+        )
+        .unwrap();
+        assert_eq!(r, catalog());
+        call_native("media.cancel", json!({"token": "tok-a"})).unwrap();
+    }
+
     #[test]
     fn manifest_shape() {
         let m = call_native("plugin.manifest", json!({})).unwrap();
@@ -1101,21 +1191,124 @@ mod tests {
         drag("obj.0.rotate", "end", 0.0, 0.0);
         let ov = last_overlay(&take_host_log());
         let (l, t, w, h) = rect_of(find_key(&ov, "obj.0").unwrap());
-        // 90° なら正方形のバウンディングボックスは元と同じ大きさで、中心も同じ
-        assert!((w - w0).abs() < 0.5 && (h - h0).abs() < 0.5, "90° keeps the aabb: {w0}x{h0} → {w}x{h}");
+        // Box は回転前の正方形なので大きさも中心も変わらず、`angle` が 90° になる(v0.6)
+        assert!((w - w0).abs() < 0.5 && (h - h0).abs() < 0.5, "90° keeps the unrotated rect: {w0}x{h0} → {w}x{h}");
         assert!((l + w / 2.0 - 150.0).abs() < 1e-3 && (t + h / 2.0 - 100.0).abs() < 1e-3);
+        let a = find_key(&ov, "obj.0").unwrap()["p"]["angle"].as_f64().unwrap();
+        assert!((a - 90.0).abs() < 0.5, "angle 90°: {a}");
         // ハンドルは右側(中心の高さ)へ移った
         let (nl, nt, nw, nh) = rect_of(find_key(&ov, "obj.0.rotate").unwrap());
         assert!(nl + nw / 2.0 > 150.0 + w0 / 2.0, "rotate handle moved to the right: {}", nl + nw / 2.0);
         assert!((nt + nh / 2.0 - 100.0).abs() < 0.5, "rotate handle at center height: {}", nt + nh / 2.0);
         assert!((rl - nl).abs() > 10.0);
-        // 45° にすると aabb は √2 倍に広がる
+        // 右のハンドルをさらに下へ → 135°。Box の矩形は回転前の正方形のまま(`angle` だけ変わる)。ハンドル / ボタンは回転後の外接矩形(√2 倍)に付く
         drag("obj.0.rotate", "start", 0.0, 0.0);
         drag("obj.0.rotate", "update", 0.0, dist);
         drag("obj.0.rotate", "end", 0.0, 0.0);
-        let (_, _, w, h) = rect_of(find_key(&last_overlay(&take_host_log()), "obj.0").unwrap());
-        assert!((w - w0 * std::f64::consts::SQRT_2).abs() < 0.5 && (w - h).abs() < 1e-3, "45°: {w}");
+        let ov = last_overlay(&take_host_log());
+        let obj = find_key(&ov, "obj.0").unwrap();
+        let (_, _, w, h) = rect_of(obj);
+        assert!((w - w0).abs() < 0.5 && (w - h).abs() < 1e-3, "135° keeps the rect: {w}");
+        assert!((obj["p"]["angle"].as_f64().unwrap() - 135.0).abs() < 0.5, "angle 135°: {}", obj["p"]["angle"]);
+        let (sl, st, sw, sh) = rect_of(find_key(&ov, "obj.0.scale").unwrap());
+        let ext = w0 * std::f64::consts::SQRT_2 / 2.0;
+        assert!((sl + sw / 2.0 - (150.0 + ext)).abs() < 0.5 && (st + sh / 2.0 - (100.0 + ext)).abs() < 0.5, "scale handle at the rotated aabb corner");
         let _ = call_native("media.cancel", json!({"token": "tok-rot"}));
+        take_host_log();
+    }
+
+    #[test]
+    fn overlay_boxes_carry_label_and_angle() {
+        let _g = serial();
+        open_session("tok-lbl");
+        call_native("sticker.add.1", json!({})).unwrap();
+        call_native("obj.0.dup", json!({"kind": "tap"})).unwrap();
+        let ov = last_overlay(&take_host_log());
+        let o0 = find_key(&ov, "obj.0").expect("obj.0");
+        let o1 = find_key(&ov, "obj.1").expect("obj.1");
+        assert_eq!(o0["p"]["label"], json!("スタンプ 1"));
+        assert_eq!(o1["p"]["label"], json!("スタンプ 2"));
+        assert_eq!(o0["p"]["angle"], json!(0.0));
+        // ハンドル / ボタンには label を付けない(合わせる先の一覧に出さない)
+        for k in ["obj.1.scale", "obj.1.rotate", "obj.1.delete", "obj.1.dup"] {
+            assert!(find_key(&ov, k).unwrap()["p"].get("label").is_none(), "{k} has no label");
+        }
+        // 回転前の正方形(中心 ± 一辺/2)で出す
+        let (l, t, w, h) = rect_of(o0);
+        assert!((w - h).abs() < 1e-3 && (l + w / 2.0 - 150.0).abs() < 1e-3 && (t + h / 2.0 - 100.0).abs() < 1e-3);
+        let _ = call_native("media.cancel", json!({"token": "tok-lbl"}));
+        take_host_log();
+    }
+
+    #[test]
+    fn move_end_with_snap_fits_object_into_target() {
+        let _g = serial();
+        open_session("tok-snap");
+        call_native("sticker.add.0", json!({})).unwrap();
+        take_host_log();
+        // 合わせる先: 横長の矩形(80×50、左上 (20, 30))、30° → 一辺 = 50、中心 = (60, 55)、角度 30°
+        drag("obj.0.move", "start", 0.0, 0.0);
+        drag("obj.0.move", "update", -50.0, -30.0);
+        call_native(
+            "obj.0.move",
+            json!({"kind": "drag", "phase": "end", "x": 5.0, "y": 5.0, "dx": 0.0, "dy": 0.0,
+                   "snap": {"key": "shape.0", "label": "四角 1", "left": 20.0, "top": 30.0, "width": 80.0, "height": 50.0, "angle": 30.0}}),
+        )
+        .unwrap();
+        let log = take_host_log();
+        let ov = last_overlay(&log);
+        let obj = find_key(&ov, "obj.0").unwrap();
+        let (l, t, w, h) = rect_of(obj);
+        assert!((w - 50.0).abs() < 1e-3 && (h - 50.0).abs() < 1e-3, "size = min(80, 50): {w}x{h}");
+        assert!((l + w / 2.0 - 60.0).abs() < 1e-3 && (t + h / 2.0 - 55.0).abs() < 1e-3, "centered on the target: ({}, {})", l + w / 2.0, t + h / 2.0);
+        assert!((obj["p"]["angle"].as_f64().unwrap() - 30.0).abs() < 1e-3, "angle: {}", obj["p"]["angle"]);
+        // プレビューも出し直している
+        assert!(last_call(&log, "composer.media.preview").is_some());
+
+        // `angle` 省略 → 0。最小サイズより小さい先には 16px で止まる
+        call_native(
+            "obj.0.move",
+            json!({"phase": "end", "dx": 0.0, "dy": 0.0, "snap": {"key": "face.0", "left": 100.0, "top": 100.0, "width": 4.0, "height": 4.0}}),
+        )
+        .unwrap();
+        let ov = last_overlay(&take_host_log());
+        let obj = find_key(&ov, "obj.0").unwrap();
+        let (l, t, w, _) = rect_of(obj);
+        assert!((w - MIN_OBJECT_SIZE as f64).abs() < 1e-3 && (l + w / 2.0 - 102.0).abs() < 1e-3 && (t + w / 2.0 - 102.0).abs() < 1e-3);
+        assert_eq!(obj["p"]["angle"], json!(0.0));
+
+        // 自分の Box(obj.0)への snap は無視(位置 / 大きさ / 角度は変わらない)
+        drag("obj.0.move", "update", 10.0, 10.0);
+        take_host_log();
+        call_native(
+            "obj.0.move",
+            json!({"phase": "end", "dx": 0.0, "dy": 0.0, "snap": {"key": "obj.0", "left": 0.0, "top": 0.0, "width": 200.0, "height": 200.0, "angle": 90.0}}),
+        )
+        .unwrap();
+        let ov = last_overlay(&take_host_log());
+        let obj = find_key(&ov, "obj.0").unwrap();
+        let (l, t, w, _) = rect_of(obj);
+        assert!((w - MIN_OBJECT_SIZE as f64).abs() < 1e-3 && (l + w / 2.0 - 112.0).abs() < 1e-3 && (t + w / 2.0 - 112.0).abs() < 1e-3, "self-snap ignored");
+        assert_eq!(obj["p"]["angle"], json!(0.0));
+
+        // snap 無しの end は従来どおり(何も変わらない)。壊れた snap も無視
+        call_native("obj.0.move", json!({"phase": "end", "dx": 0.0, "dy": 0.0})).unwrap();
+        call_native("obj.0.move", json!({"phase": "end", "dx": 0.0, "dy": 0.0, "snap": {"key": "x", "left": "a", "width": 10}})).unwrap();
+        call_native("obj.0.move", json!({"phase": "end", "dx": 0.0, "dy": 0.0, "snap": {"key": "x", "left": 0, "top": 0, "width": 0, "height": 10}})).unwrap();
+        let ov = last_overlay(&take_host_log());
+        let obj = find_key(&ov, "obj.0").unwrap();
+        let (l, t, w, _) = rect_of(obj);
+        assert!((w - MIN_OBJECT_SIZE as f64).abs() < 1e-3 && (l + w / 2.0 - 112.0).abs() < 1e-3 && (t + w / 2.0 - 112.0).abs() < 1e-3);
+
+        // scale / rotate の end に付いた snap は無視される
+        drag("obj.0.scale", "start", 0.0, 0.0);
+        call_native("obj.0.scale", json!({"phase": "end", "dx": 0.0, "dy": 0.0, "snap": {"key": "x", "left": 0.0, "top": 0.0, "width": 100.0, "height": 100.0, "angle": 45.0}})).unwrap();
+        let ov = last_overlay(&take_host_log());
+        let obj = find_key(&ov, "obj.0").unwrap();
+        let (_, _, w, _) = rect_of(obj);
+        assert!((w - MIN_OBJECT_SIZE as f64).abs() < 1e-3);
+        assert_eq!(obj["p"]["angle"], json!(0.0));
+        let _ = call_native("media.cancel", json!({"token": "tok-snap"}));
         take_host_log();
     }
 
