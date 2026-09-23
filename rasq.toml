@@ -20,3 +20,13 @@ lazy = false
 [[assets]]
 path = "models/seeta_fd_frontal_v1.0.bin"
 kind = "data"
+
+# 権限の理由(rasq build が配布物の目次 root.safety に入れ、Central が掲載に反映する)。
+# 審査 (rasq-judge) は宣言した権限すべてに理由があるかを見る。無いと自動では承認されない。
+[listing.safety]
+external_hosts = []
+data_handling = "データは端末の中だけで扱い、外部には送信しません。"
+
+[[listing.safety.permissions]]
+permission = "fow.widget"
+reason = "スタンプの一覧と、貼ったスタンプの移動・拡縮・回転ハンドルを表示するため"
