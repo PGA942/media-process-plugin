@@ -25,8 +25,8 @@ variables:
     - |
       SDK_DIR="$CI_PROJECT_DIR/../rasq-sdk-sample"
       rm -rf "$SDK_DIR"
-      git clone --depth 1 -b "$SDK_SAMPLE_BRANCH" "https://gitlab-ci-token:${CI_JOB_TOKEN}@${CI_SERVER_HOST}/orgate-question/rasq-sdk-sample.git" "$SDK_DIR" \
-        || git clone --depth 1 "https://gitlab-ci-token:${CI_JOB_TOKEN}@${CI_SERVER_HOST}/orgate-question/rasq-sdk-sample.git" "$SDK_DIR"
+      git clone --depth 1 -b "$SDK_SAMPLE_BRANCH" "${CI_SERVER_PROTOCOL}://gitlab-ci-token:${CI_JOB_TOKEN}@${CI_SERVER_HOST}:${CI_SERVER_PORT}/orgate-question/rasq-sdk-sample.git" "$SDK_DIR" \
+        || git clone --depth 1 "${CI_SERVER_PROTOCOL}://gitlab-ci-token:${CI_JOB_TOKEN}@${CI_SERVER_HOST}:${CI_SERVER_PORT}/orgate-question/rasq-sdk-sample.git" "$SDK_DIR"
     # 2. rasq CLI を組む(スキーマ / 登録簿 / 雛形はバイナリに同梱されている)
     - (cd "$CI_PROJECT_DIR/../rasq-sdk-sample/rust" && cargo build --release -p rasq-cli)
     - export PATH="$CI_PROJECT_DIR/../rasq-sdk-sample/rust/target/release:$PATH"
