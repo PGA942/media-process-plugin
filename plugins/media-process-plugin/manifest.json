@@ -1,0 +1,26 @@
+{
+  "schema": "rasq.plugin-manifest/1",
+  "id": "sample.media-process",
+  "name": "加工(顔ぼかし / スタンプ)(サンプル)",
+  "version": "0.1.0",
+  "kind": "action",
+  "description": "顔を検知してぼかす、スタンプをオブジェクトとして貼る(移動 / 拡縮 / 回転 / 削除 / 複製)",
+  "slots": [
+    "composer.media"
+  ],
+  "permissions": [
+    "fow.widget"
+  ],
+  "actions": [
+    {
+      "id": "process",
+      "slot": "composer.media",
+      "label": "加工",
+      "icon": "auto_fix_high",
+      "tags": [
+        "Filter",
+        "Blur"
+      ]
+    }
+  ]
+}

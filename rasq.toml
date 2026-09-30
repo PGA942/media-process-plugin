@@ -1,0 +1,32 @@
+schema = "rasq.workspace/1"
+sdk = "0.1.0"
+
+[author]
+namespace = "sample"
+
+[[plugins]]
+name = "media-process-plugin"
+slot = "composer.media"
+id = "sample.media-process"
+
+# 顔検知のカスケード(SeetaFace FuSt、docs/cli.md §2 / §4)。
+# [[models]] = どんなモデルを使っているかの宣言(審査で見えるようにする)。
+# [[assets]] = その本体。配布物に 1 つだけ入れ、ビルド時は include_bytes! で wasm に取り込む
+#             (ホストが storage.get({ns: "asset"}) を配線したら include_bytes! をやめられる)。
+[[models]]
+manifest = "models/seeta-fd-frontal.model.json"
+lazy = false
+
+[[assets]]
+path = "models/seeta_fd_frontal_v1.0.bin"
+kind = "data"
+
+# 権限の理由(rasq build が配布物の目次 root.safety に入れ、Central が掲載に反映する)。
+# 審査 (rasq-judge) は宣言した権限すべてに理由があるかを見る。無いと自動では承認されない。
+[listing.safety]
+external_hosts = []
+data_handling = "データは端末の中だけで扱い、外部には送信しません。"
+
+[[listing.safety.permissions]]
+permission = "fow.widget"
+reason = "スタンプの一覧と、貼ったスタンプの移動・拡縮・回転ハンドルを表示するため"

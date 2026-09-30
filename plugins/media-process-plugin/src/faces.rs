@@ -1,6 +1,6 @@
 //! 顔検知。SeetaFace の FuSt カスケード(`rustface` = 純 Rust 移植)を **wasm の中で**動かす。
 //!
-//! ホストに ONNX ランタイムが無いので YuNet は使えない。モデル(`model/seeta_fd_frontal_v1.0.bin`、約 1.2 MB、正面顔)を
+//! ホストに ONNX ランタイムが無いので YuNet は使えない。モデル(`models/seeta_fd_frontal_v1.0.bin`、約 1.2 MB、正面顔)を
 //! `include_bytes!` で埋め込み、初回だけ [`rustface::read_model`] でパースして検知器を保持する。
 //! 入力は長辺 ≤ [`DETECT_MAX_SIDE`] のグレースケール(呼び出し側が縮める)。
 
@@ -20,7 +20,7 @@ const MIN_FACE_SIZE: u32 = 20;
 /// トグルで外せるので低めにする。
 const SCORE_THRESH: f64 = 2.0;
 
-static MODEL_BYTES: &[u8] = include_bytes!("../model/seeta_fd_frontal_v1.0.bin");
+static MODEL_BYTES: &[u8] = include_bytes!("../../../models/seeta_fd_frontal_v1.0.bin");
 
 thread_local! {
     static DETECTOR: RefCell<Option<Box<dyn Detector>>> = RefCell::new(None);
