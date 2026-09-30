@@ -1,0 +1,31 @@
+{
+  "id": "sample.media-process/seeta-fd-frontal",
+  "version": "1.0.0",
+  "task": "custom",
+  "io": {
+    "input": "tensors",
+    "output": "tensors"
+  },
+  "runtimes": {
+    "embedded": {
+      "format": "seetaface-fust-cascade",
+      "loader": "rustface",
+      "asset": "models/seeta_fd_frontal_v1.0.bin",
+      "$comment": "本体は [[assets]](kind = data)として配布物に 1 つだけ入れ、プラグインの wasm は include_bytes! で同じファイルを取り込む。ml.infer は使わないので、ホストはこのモデルを読み込まなくてよい。"
+    }
+  },
+  "placement": {
+    "prefer": [
+      "device"
+    ],
+    "allowMeteredDownload": true
+  },
+  "artifacts": {
+    "embedded": {
+      "sizeMb": 1.15,
+      "sha512": "5cf32e239f114207b2a3000ca8ca5c3e39ac667ae7869c4c1616b6a0c47c7d3162319095b535d2f6d3e6014ac5c88554fbd69afc9b31fd143c74a14fb293f584"
+    }
+  },
+  "license": "BSD-2-Clause",
+  "$comment": "SeetaFace FuSt 正面顔カスケード(rustface 同梱のもの)。model-manifest.schema.json v0.1 の runtimes は onnx / llama / server しか持たず、「プラグインの wasm に取り込む実体」を表せないため runtimes のキーは embedded にしてある(SDK への要望として報告)。runtimes.*.file を書くと rasq build が本体を目次外のファイルとして入れてしまい rasq inspect が落ちる(SDK の不備)ので、本体は [[assets]] 側で宣言している。"
+}

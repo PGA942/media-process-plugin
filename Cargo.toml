@@ -1,24 +1,9 @@
-[package]
-name = "media-process-plugin"
-version = "0.1.0"
-edition = "2021"
-license = "MIT"
-description = "顔を検知してぼかす、スタンプをオブジェクトとして貼る(移動 / 拡縮 / 回転 / 削除 / 複製)"
-
-[lib]
-crate-type = ["cdylib", "rlib"]
-
-[dependencies]
-rasq-plugin-kit = { path = "kit" }
-serde_json = "1"
-base64 = "0.22"
-# PNG / JPEG のデコード・PNG エンコードだけ(wasm サイズを抑えるため default-features は切る)
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
-# 顔検知: SeetaFace FuSt カスケードの純 Rust 移植(ONNX ランタイム不要)。rayon(スレッド)は wasm では使えないので切る
-rustface = { version = "0.1.7", default-features = false }
-
+# rasq CLI が rasq.toml から作り直すファイル(手で直しても rasq new で戻る)。
 [workspace]
-members = ["kit"]
+resolver = "2"
+members = [
+    "plugins/media-process-plugin",
+]
 
 [profile.release]
 opt-level = "s"

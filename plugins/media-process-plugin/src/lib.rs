@@ -1,4 +1,8 @@
-//! media-process-plugin — スロット `composer.media`(CONTRACT.md §2.2、v0.5)の「加工」サンプル。
+//! media-process-plugin — スロット `composer.media`(契約 v0.13、`../../CONTRACT.md` → SDK の `docs/slots.md` §2.2。
+//! v0.5 重ね、v0.6 合わせる先、v0.10 下段バーのボタン宣言)の「加工」サンプル。
+//!
+//! 下段バーのボタンは `manifest.json` の `actions[].slot = "composer.media"` で 1 つ宣言している
+//! (`process` / 「加工」/ `Filter` `Blur` タグ)。`accepts` は省略 = `["image/*"]`、`output` も省略 = `replace`。
 //!
 //! - **顔ぼかし**: wasm の中で顔を検知(SeetaFace FuSt カスケード = `rustface`、[`faces`])し、顔ごとにボックスぼかし。
 //!   検知した顔は重ね(`composer.media.overlay`)に枠 `Box` で出し、タップで顔ごとにぼかしの on / off。
@@ -8,9 +12,9 @@
 //!
 //! | 入口 | 中身 |
 //! |---|---|
-//! | `plugin.manifest` | [`rasq_plugin_kit::manifest`] |
+//! | `plugin.manifest` | `manifest.json` を `include_str!` でそのまま返す |
 //! | `media.catalog {}` | 静的な一覧 [`catalog`](ジャンル `process`: `faces` / `sticker` / `reset`)。セッション不要 |
-//! | `media.edit {token, index, name, mimeType, bytesB64}` | デコード → 保持(長辺 ≤ 2048)→ 初期プレビューを push(`width`/`height` 付き)→ 戻り `{genres}` |
+//! | `media.edit {token, index, name, mimeType, actionId?, bytesB64}` | デコード → 保持(長辺 ≤ 2048)→ 初期プレビューを push(`width`/`height` 付き)→ 戻り `{genres}` |
 //! | `media.action {token, genre:"process", action}` | `faces`: 検知 → ぼかし → プレビュー + 重ね(無ければ toast)。`sticker`: FOW を開く。`reset`: 初期化。戻り `{}` |
 //! | `face.<i>`(重ねの `tap`) | 顔 `i` のぼかしをトグル → プレビュー + 重ねを出し直す |
 //! | `sticker.add.<i>`(FOW の `tap`) | スプライト `i` をプレビュー中央に置いて選択 → プレビュー + 重ね |
@@ -38,13 +42,13 @@ use image::codecs::png::{CompressionType, FilterType, PngEncoder};
 use image::{ImageEncoder, ImageFormat, RgbaImage};
 use ops::{RectF, Sticker};
 use rasq_plugin_kit::serde_json::{json, Value};
-use rasq_plugin_kit::{err, fow_spec, host, manifest, rasq_plugin, rrl, unsupported, Surface};
+use rasq_plugin_kit::{err, fow_spec, host, rasq_plugin, rrl, unsupported, Surface};
 use std::sync::{Mutex, OnceLock};
 
-const PLUGIN_ID: &str = "sample.media-process";
-const VERSION: &str = "0.1.0";
-const PLUGIN_NAME: &str = "加工(顔ぼかし / スタンプ)(サンプル)";
-const DESCRIPTION: &str = "顔を検知してぼかす、スタンプをオブジェクトとして貼る(移動 / 拡縮 / 回転 / 削除 / 複製)";
+/// `plugin.manifest` の答え = `manifest.json`(名前 / 版 / 説明 / 権限 / ボタン宣言はあちらを直す)。
+fn manifest() -> Value {
+    rasq_plugin_kit::serde_json::from_str(include_str!("../manifest.json")).expect("manifest.json")
+}
 
 /// プレビューの長辺(px)。重ねの座標系もこれ。
 pub const PREVIEW_MAX_SIDE: u32 = 360;
@@ -674,7 +678,7 @@ fn object_event(rest: &str, args: &Value) -> Result<Value, Value> {
 
 fn handle(fn_name: &str, args: Value) -> Result<Value, Value> {
     match fn_name {
-        "plugin.manifest" => Ok(manifest(PLUGIN_ID, PLUGIN_NAME, VERSION, "action", DESCRIPTION, &["composer.media"], &["fow.widget"])),
+        "plugin.manifest" => Ok(manifest()),
         "media.catalog" => Ok(catalog()),
         "media.edit" => media_edit(args),
         "media.action" => media_action(args),
@@ -915,6 +919,42 @@ mod tests {
     }
 
     // ---- call: マニフェスト / 一覧 / 入力検証 ---------------------------------
+
+    /// `plugin.manifest` は `manifest.json` そのもの(`rasq check` の往復検査と同じ突き合わせ)。
+    #[test]
+    fn manifest_matches_manifest_json() {
+        let m = call_native("plugin.manifest", json!({})).unwrap();
+        let file: Value = rasq_plugin_kit::serde_json::from_str(include_str!("../manifest.json")).unwrap();
+        assert_eq!(m, file);
+    }
+
+    /// 下段バーのボタン宣言(v0.10): `actions[].slot` は宣言したスロットのものだけ。
+    #[test]
+    fn declared_actions_are_composer_media() {
+        let m = call_native("plugin.manifest", json!({})).unwrap();
+        let actions = m["actions"].as_array().expect("actions が宣言されていない(v0.10)");
+        assert!(!actions.is_empty());
+        for a in actions {
+            assert_eq!(a["slot"], json!("composer.media"), "actions[].slot: {a}");
+            assert!(a["id"].is_string() && a["label"].is_string(), "id / label が要る: {a}");
+        }
+    }
+
+    /// 押されたボタンの `actionId`(v0.10)が付いても `media.edit` は同じジャンル一覧を返す。
+    #[test]
+    fn media_edit_accepts_action_id() {
+        let _g = serial();
+        let _ = call_native("media.cancel", json!({}));
+        set_host_hook(|_, _| json!({}));
+        take_host_log();
+        let r = call_native(
+            "media.edit",
+            json!({"token": "tok-a", "index": 0, "name": "a.png", "mimeType": "image/png", "actionId": "process", "bytesB64": flat_png(64, 48, [10, 20, 30, 255])}),
+        )
+        .unwrap();
+        assert_eq!(r, catalog());
+        call_native("media.cancel", json!({"token": "tok-a"})).unwrap();
+    }
 
     #[test]
     fn manifest_shape() {

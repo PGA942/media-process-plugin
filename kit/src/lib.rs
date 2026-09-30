@@ -1,6 +1,6 @@
 //! rasq-plugin-kit — RASQ wasm プラグインの共通部品。
 //!
-//! `rasq-sdk-sample/PROTOCOL.md` の wasm ABI(v1・同期)をそのまま包む:
+//! `PROTOCOL.md` の wasm ABI(v1・同期)をそのまま包む:
 //!
 //! - [`rasq_plugin!`] マクロが `snapshot` / `patch` / `call` / `alloc` / `dealloc` を export
 //! - [`host_call`] でホスト関数(`rasq.hostfn/1`)を呼ぶ(native ビルドではテスト用フックに差し替え可)
@@ -8,7 +8,7 @@
 //! - [`set_patch`] / [`tree_updated`] で本体ツリーの差分/再取得を頼む
 //!
 //! プラグイン本体は「`root()` が返す RRL」と「`call(fn, args)` の match」だけ書けばよい。
-//! 契約の正典は `../CONTRACT.md`(スロット契約)と rasq-sdk-sample の `PROTOCOL.md`。
+//! 契約の正典は `docs/slots.md`(スロット契約)と `PROTOCOL.md`。plugin-sample の各リポジトリの `kit/` はこのクレートの複製(D-244i: ここが正典、`rasq init` がワークスペースへ写す)。
 
 use serde_json::{json, Value};
 use std::cell::RefCell;
@@ -387,6 +387,22 @@ pub mod host {
     pub fn storage_set(key: &str, value: Value) {
         host_call("storage.set", json!({"ns": "safe", "key": key, "value": value}));
     }
+    /// `storage.delete {ns: "safe", key}`: 保存した値を消す。
+    pub fn storage_delete(key: &str) {
+        host_call("storage.delete", json!({"ns": "safe", "key": key}));
+    }
+    /// `net.fetch {method, url, headers?, body?}`(権限 `network`、宣言したホストだけ): ホスト代理の HTTP。
+    /// 戻り = `host_call` の答えそのまま(成功なら `value.status` / `value.bodyText`、失敗なら `error.code` = `B01` / `B03` / `E01`)。
+    pub fn net_fetch(method: &str, url: &str, headers: Option<Value>, body: Option<&str>) -> Value {
+        let mut a = json!({"method": method, "url": url});
+        if let Some(h) = headers {
+            a["headers"] = h;
+        }
+        if let Some(b) = body {
+            a["body"] = json!(b);
+        }
+        host_call("net.fetch", a)
+    }
     pub fn clipboard_set(text: &str) -> Value {
         host_call("clipboard.set", json!({"text": text}))
     }
@@ -442,6 +458,35 @@ pub mod host {
     }
     pub fn viewer_overlay_set(token: &str, root: Value) -> Value {
         host_call("viewer.overlay.set", json!({"token": token, "root": root}))
+    }
+    /// `page.render {token, root, title?}`(slot page、v0.18): ページの RRL を丸ごと差し替える。
+    pub fn page_render(token: &str, root: Value, title: Option<&str>) -> Value {
+        let mut a = json!({"token": token, "root": root});
+        if let Some(t) = title {
+            a["title"] = json!(t);
+        }
+        host_call("page.render", a)
+    }
+    /// `page.end {token}`(slot page、v0.19): プラグインが自分で終わる。surface `swing` では見終えたことにして次へ進む。
+    pub fn page_end(token: &str) -> Value {
+        host_call("page.end", json!({"token": token}))
+    }
+    /// `shared.set {token, key, value, ifRev?}`(v0.18、権限 shared.session): サーバー変数を書く(`Value::Null` で消す)。
+    /// `me.` で始まるキーはサーバーが `@<accountId>.` に書き換える。反映は `page.event {type: "var"}` で届く。
+    pub fn shared_set(token: &str, key: &str, value: Value, if_rev: Option<u64>) -> Value {
+        let mut a = json!({"token": token, "key": key, "value": value});
+        if let Some(r) = if_rev {
+            a["ifRev"] = json!(r);
+        }
+        host_call("shared.set", a)
+    }
+    /// `shared.op {token, key, op, value}`(v0.18): `incr` / `append` / `remove` / `merge` をサーバー側で原子的に。
+    pub fn shared_op(token: &str, key: &str, op: &str, value: Value) -> Value {
+        host_call("shared.op", json!({"token": token, "key": key, "op": op, "value": value}))
+    }
+    /// `shared.call {token, fn, args}`(v0.18): 参加者全員(自分も)へ `page.event {type: "call", fn, args, from}` を配る。
+    pub fn shared_call(token: &str, fn_name: &str, args: Value) -> Value {
+        host_call("shared.call", json!({"token": token, "fn": fn_name, "args": args}))
     }
 }
 
