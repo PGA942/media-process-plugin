@@ -2,18 +2,20 @@
 //! 3×3 のスーパーサンプリングで縁を滑らかにする。
 
 use image::{Rgba, RgbaImage};
+use rasq_plugin_kit::i18n;
 use std::sync::OnceLock;
 
 pub const SPRITE_SIZE: u32 = 96;
 pub const SPRITE_COUNT: usize = 3;
 
-/// スタンプの表示名(FOW のラベル)。
+/// スタンプの表示名(FOW のラベル)。call の言語([`i18n::current`])で引く。
 pub fn label(i: usize) -> &'static str {
-    match i {
-        0 => "スマイル",
-        1 => "ハート",
-        _ => "スター",
-    }
+    let key = match i {
+        0 => "sticker.smile",
+        1 => "sticker.heart",
+        _ => "sticker.star",
+    };
+    crate::text::TEXT.t(&i18n::current(), key)
 }
 
 /// `i` 番目のスプライト(キャッシュ)。範囲外は最後のもの。
