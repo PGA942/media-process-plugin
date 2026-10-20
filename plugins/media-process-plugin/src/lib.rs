@@ -35,6 +35,7 @@
 pub mod faces;
 pub mod ops;
 pub mod sprites;
+mod text;
 
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
@@ -42,8 +43,9 @@ use image::codecs::png::{CompressionType, FilterType, PngEncoder};
 use image::{ImageEncoder, ImageFormat, RgbaImage};
 use ops::{RectF, Sticker};
 use rasq_plugin_kit::serde_json::{json, Value};
-use rasq_plugin_kit::{err, fow_spec, host, rasq_plugin, rrl, unsupported, Surface};
+use rasq_plugin_kit::{err, fow_spec, host, i18n, rasq_plugin, rrl, unsupported, Surface};
 use std::sync::{Mutex, OnceLock};
+use text::TEXT;
 
 /// `plugin.manifest` の答え = `manifest.json`(名前 / 版 / 説明 / 権限 / ボタン宣言はあちらを直す)。
 fn manifest() -> Value {
@@ -76,15 +78,16 @@ static STICKER_FOW: Surface = Surface::new(STICKER_FOW_ID);
 pub const GENRE_PROCESS: &str = "process";
 
 /// `media.catalog` / `media.edit` の戻り `{genres: [{id, actions: [{id, label, icon}]}]}`。
-/// 既定ジャンル `process` なので `label` / `icon` はホストに任せる。
+/// 既定ジャンル `process` なので `label` / `icon` はホストに任せる。アクションの `label` は call の言語([`i18n::current`])で引く。
 pub fn catalog() -> Value {
+    let loc = i18n::current();
     json!({
         "genres": [
             {"id": GENRE_PROCESS, "actions": [
                 // 顔ぼかし(`faces`)は実機で検知できなかったので一覧から外した(呼べば動く。ONNX の `ml.infer` が
                 // つながったら YuNet で戻す予定)。
-                {"id": "sticker", "label": "スタンプ", "icon": "emoji_emotions"},
-                {"id": "reset", "label": "リセット", "icon": "restart_alt"},
+                {"id": "sticker", "label": TEXT.t(&loc, "action.sticker"), "icon": "emoji_emotions"},
+                {"id": "reset", "label": TEXT.t(&loc, "action.reset"), "icon": "restart_alt"},
             ]},
         ]
     })
@@ -264,6 +267,7 @@ fn sized_box(key: &str, x: f32, y: f32, w: f32, h: f32, props: Value, children: 
 
 /// 重ねの RRL(プレビュー px の `Stack`)。顔の枠 + オブジェクトの枠 + 選択中のハンドル / ボタン。
 fn overlay_root(s: &Session) -> Value {
+    let loc = i18n::current();
     let (pw, ph) = s.preview_size();
     let full = s.full.dimensions();
     let mut children = Vec::new();
@@ -277,7 +281,7 @@ fn overlay_root(s: &Session) -> Value {
             r.y,
             r.w,
             r.h,
-            json!({"color": "#00000000", "borderColor": color, "borderWidth": border, "radius": 6, "label": format!("顔 {}", i + 1)}),
+            json!({"color": "#00000000", "borderColor": color, "borderWidth": border, "radius": 6, "label": TEXT.f(&loc, "overlay.face", &[("n", &(i + 1).to_string())])}),
             vec![],
         );
         children.push(rrl::with_on(node, "tap", &format!("face.{i}")));
@@ -296,7 +300,7 @@ fn overlay_root(s: &Session) -> Value {
             r.h,
             json!({
                 "color": "#00000000", "borderColor": color, "borderWidth": border, "radius": 4,
-                "label": format!("スタンプ {}", i + 1),
+                "label": TEXT.f(&loc, "overlay.sticker", &[("n", &(i + 1).to_string())]),
                 "angle": o.angle_degrees() as f64,
             }),
             vec![],
@@ -397,20 +401,25 @@ fn refresh(s: &mut Session) -> Result<(), Value> {
 }
 
 fn sticker_fow_root() -> Value {
+    let loc = i18n::current();
     let tiles = (0..sprites::SPRITE_COUNT)
         .map(|i| {
             let img = rrl::with_on(rrl::image_sized(&format!("sticker.{i}"), sprite_data_uri(i), 64.0, 64.0), "tap", &format!("sticker.add.{i}"));
             rrl::column(&format!("sticker.{i}.col"), vec![img, rrl::text(&format!("sticker.{i}.label"), sprites::label(i))])
         })
         .collect();
-    rrl::column("root", vec![rrl::row("stickers", tiles), rrl::spacer("sp", 8.0), rrl::button("close", "閉じる", "closeSticker")])
+    rrl::column("root", vec![rrl::row("stickers", tiles), rrl::spacer("sp", 8.0), rrl::button("close", TEXT.t(&loc, "sticker.close"), "closeSticker")])
 }
 
 fn open_sticker_fow(s: &mut Session) {
     if s.sticker_fow {
         return;
     }
-    s.sticker_fow = STICKER_FOW.open(fow_spec("スタンプ", 0.28), sticker_fow_root(), Some("stickerClosed"), json!({}));
+    let loc = i18n::current();
+    let mut spec = fow_spec(TEXT.t(&loc, "sticker.title"), 0.28);
+    // kit の `fow_spec` は閉じるボタンの文を日本語で決め打ちしているので、言語に合わせて置き換える。
+    spec["cancelText"] = json!(TEXT.t(&loc, "sticker.close"));
+    s.sticker_fow = STICKER_FOW.open(spec, sticker_fow_root(), Some("stickerClosed"), json!({}));
 }
 
 fn close_sticker_fow(s: &mut Session) {
@@ -466,7 +475,7 @@ fn action_faces(s: &mut Session) -> Result<Value, Value> {
     let found = faces::detect_in_image(&s.full).map_err(|e| err("D01", e))?;
     s.faces = found.into_iter().map(|r| Face { rect: r, enabled: true }).collect();
     if s.faces.is_empty() {
-        host::toast("顔が見つかりませんでした");
+        host::toast(TEXT.t(&i18n::current(), "faces.notFound"));
         // 前回の顔枠も無くなったので重ねだけ整える(オブジェクトが無ければ消える)
         sync_overlay(s);
         return Ok(json!({}));
@@ -1401,6 +1410,37 @@ mod tests {
         assert_eq!(call_native("face.0", json!({})).unwrap_err()["code"], json!("D01"));
         let _ = call_native("media.cancel", json!({"token": "tok-f"}));
         take_host_log();
+    }
+
+    /// `args.locale`(PROTOCOL.md §4.6)の言語で、ボタン・FOW・重ねの名前・toast を引く。
+    #[test]
+    fn texts_follow_args_locale() {
+        let _g = serial();
+        open_session("tok-l");
+        let _ = i18n::take_misses();
+        let labels = |r: &Value| r["genres"][0]["actions"].as_array().unwrap().iter().map(|a| a["label"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        assert_eq!(labels(&call_native("media.catalog", json!({"locale": "en"})).unwrap()), ["Sticker", "Reset"]);
+        assert_eq!(labels(&call_native("media.catalog", json!({"locale": "zh-Hans"})).unwrap()), ["贴纸", "重置"]);
+        assert_eq!(labels(&call_native("media.catalog", json!({})).unwrap()), ["スタンプ", "リセット"], "locale 無し = ja");
+
+        take_host_log();
+        call_native("media.action", json!({"token": "tok-l", "genre": "process", "action": "sticker", "locale": "zh-Hant"})).unwrap();
+        let log = take_host_log();
+        let open = last_call(&log, "fow.open").expect("fow.open");
+        assert_eq!(open["spec"]["title"], json!("貼圖"));
+        assert_eq!(open["spec"]["cancelText"], json!("關閉"));
+        assert_eq!(find_key(&open["root"], "sticker.1.label").unwrap()["p"]["text"], json!("愛心"));
+        assert_eq!(find_key(&open["root"], "close").unwrap()["p"]["label"], json!("關閉"));
+
+        call_native("sticker.add.0", json!({"locale": "ko"})).unwrap();
+        assert_eq!(find_key(&last_overlay(&take_host_log()), "obj.0").unwrap()["p"]["label"], json!("스티커 1"));
+
+        call_native("media.action", json!({"token": "tok-l", "genre": "process", "action": "faces", "locale": "en"})).unwrap();
+        assert_eq!(last_call(&take_host_log(), "toast").expect("toast")["message"], json!("No faces found"));
+
+        let _ = call_native("media.cancel", json!({"token": "tok-l"}));
+        take_host_log();
+        assert!(i18n::take_misses().is_empty());
     }
 
     #[test]
